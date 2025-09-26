@@ -29,6 +29,7 @@ import (
 
 	datav1alpha1 "github.com/aleksandarss/redis-operator.git/api/v1alpha1"
 
+	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -93,6 +94,57 @@ func (r *RedisClusterReconciler) ensureHeadlessService(ctx context.Context, rc *
 	return err
 }
 
+func (r *RedisClusterReconciler) ensureStatefulSet(ctx context.Context, rc *datav1alpha1.RedisCluster) error {
+	statefulSet := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      rc.Name + "-redis",
+			Namespace: rc.Namespace,
+		},
+	}
+
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, statefulSet, func() error {
+		statefulSet.Labels = r.labels(rc)
+
+		statefulSet.Spec.Selector = &metav1.LabelSelector{
+			MatchLabels: map[string]string{
+				"app.kubernetes.io/name":     "redis",
+				"app.kubernetes.io/instance": rc.Name,
+			},
+		}
+
+		statefulSet.Spec.ServiceName = r.names(rc)
+		replicas := rc.Spec.Replicas
+		statefulSet.Spec.Replicas = &replicas
+
+		statefulSet.Spec.Template.Labels = map[string]string{
+			"app.kubernetes.io/name":     "redis",
+			"app.kubernetes.io/instance": rc.Name,
+		}
+
+		port := int32(6379)
+		if rc.Spec.Service.Port != nil {
+			port = *rc.Spec.Service.Port
+		}
+
+		statefulSet.Spec.Template.Spec.Containers = []corev1.Container{
+			{
+				Name:  "redis",
+				Image: rc.Spec.Image,
+				Ports: []corev1.ContainerPort{
+					{
+						Name:          "redis",
+						ContainerPort: port,
+					},
+				},
+			},
+		}
+
+		return controllerutil.SetControllerReference(rc, statefulSet, r.Scheme)
+	})
+
+	return err
+}
+
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 // TODO(user): Modify the Reconcile function to compare the state specified by
@@ -117,6 +169,11 @@ func (r *RedisClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
+	if err := r.ensureStatefulSet(ctx, rc); err != nil {
+		logf.Log.Error(err, "Failed to ensure statefule set")
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{}, nil
 }
 
@@ -124,6 +181,8 @@ func (r *RedisClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request
 func (r *RedisClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&datav1alpha1.RedisCluster{}).
+		Owns(&corev1.Service{}).
+		Owns(&appsv1.StatefulSet{}).
 		Named("rediscluster").
 		Complete(r)
 }

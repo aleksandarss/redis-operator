@@ -5,7 +5,7 @@ metadata:
   namespace: redis-operator-demo
 spec:
   image: "redis:7.0-alpine"
-  replicas: 2
+  replicas: 3
   discoveryMode: WriterService
   sentinel:
     replicas: 3
