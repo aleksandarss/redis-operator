@@ -1,0 +1,18 @@
+apiVersion: data.calic.cloud/v1alpha1
+kind: RedisCluster
+metadata:
+  name: rediscluster-sample
+  namespace: redis-operator-demo
+spec:
+  image: "redis:7.0-alpine"
+  replicas: 2
+  discoveryMode: WriterService
+  sentinel:
+    replicas: 3
+  storage:
+    size: "1Gi"
+  auth:
+    secretName: ""
+  resources: {}
+  podTemplate: {}
+  discoveryMode: WriterService
