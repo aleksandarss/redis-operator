@@ -11,6 +11,7 @@ spec:
     replicas: 3
   storage:
     size: "1Gi"
+    storageClassName: local-path
   auth:
     secretName: ""
   resources: {}

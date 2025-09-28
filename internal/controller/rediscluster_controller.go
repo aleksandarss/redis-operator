@@ -20,6 +20,7 @@ import (
 	"context"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -134,6 +135,96 @@ func (r *RedisClusterReconciler) ensureStatefulSet(ctx context.Context, rc *data
 					{
 						Name:          "redis",
 						ContainerPort: port,
+					},
+				},
+				VolumeMounts: []corev1.VolumeMount{
+					{
+						Name:      "redis-data",
+						MountPath: "/data",
+					},
+				},
+				Env: []corev1.EnvVar{
+					{
+						Name:  "REDIS_PASSWORD",
+						Value: "secret123",
+					},
+					{
+						Name:  "SERVICE_NAME",
+						Value: "rediscluster-sample-redis",
+					},
+					{
+						Name:  "NAMESPACE",
+						Value: "redis-operator-demo",
+					},
+				},
+				Command: []string{
+					"sh",
+					"-lc",
+				},
+				Args: []string{
+					`
+					ORD=${HOSTNAME##*-}
+					BASE='redis-server --appendonly yes --protected-mode no --requirepass "$REDIS_PASSWORD" --masterauth "$REDIS_PASSWORD" --dir /data'
+					if [ "$ORD" = "0" ]; then
+					exec sh -lc "$BASE"
+					else
+					MASTER="${HOSTNAME%-*}-0.${SERVICE_NAME}.${NAMESPACE}.svc.${CLUSTER_DOMAIN:-cluster.local}"
+					exec sh -lc "$BASE --replicaof $MASTER 6379"
+					fi
+					`,
+					// "--appendonly yes",
+					// "--protected-mode no",
+					// "--requirepass $(REDIS_PASSWORD)",
+					// "--masterauth $(REDIS_PASSWORD)",
+					// "--dir /data",
+				},
+				ReadinessProbe: &corev1.Probe{
+					ProbeHandler: corev1.ProbeHandler{
+						Exec: &corev1.ExecAction{
+							Command: []string{
+								"sh",
+								"-lc",
+								"redis-cli -a \"$REDIS_PASSWORD\" PING | grep -q PONG",
+							},
+						},
+					},
+					InitialDelaySeconds: 5,
+					PeriodSeconds:       5,
+					TimeoutSeconds:      2,
+					FailureThreshold:    3,
+				},
+				LivenessProbe: &corev1.Probe{
+					ProbeHandler: corev1.ProbeHandler{
+						Exec: &corev1.ExecAction{
+							Command: []string{
+								"sh",
+								"-lc",
+								"redis-cli -a \"$REDIS_PASSWORD\" PING | grep -q PONG",
+							},
+						},
+					},
+					InitialDelaySeconds: 15,
+					PeriodSeconds:       10,
+					TimeoutSeconds:      2,
+					FailureThreshold:    3,
+				},
+			},
+		}
+
+		statefulSet.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "redis-data",
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{
+						corev1.ReadWriteOnce,
+					},
+					StorageClassName: rc.Spec.Storage.StorageClassName,
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceStorage: resource.MustParse(rc.Spec.Storage.Size),
+						},
 					},
 				},
 			},
